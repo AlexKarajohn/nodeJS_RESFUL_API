@@ -3,6 +3,7 @@ const Post = require('../models/post')
 const fs = require('fs');
 const path = require('path');
 const User = require('../models/user');
+const io = require('../socket');
 exports.getPost = async (req,res,next) =>{
     const postId = req.params.postId;
     try{
@@ -33,6 +34,7 @@ exports.getPosts = async (req,res,next) => {
     const totalItems = await Post.find().countDocuments()
     const posts = await Post.find()
                                 .populate('creator')
+                                .sort({createdAt: -1})
                                 .skip((currentPage -1 ) * perPage)
                                 .limit(perPage);
     res.status(200).json({
@@ -73,13 +75,17 @@ exports.createPost = async (req,res,next) => {
             creator: userId,
             imageUrl,
         })
-        const postSaveResult = await post.save()
+        await post.save()
         const user = await User.findById(userId)
-        user.posts.push(postSaveResult);
+        user.posts.push(post);
         await user.save();
+        io.getIO().emit('posts',{
+            action : 'create',
+            post: {...post._doc,creator:{_id:req.userId,name: user.name}}
+        });
         res.status(201).json({
             message: 'Post created Successfully',
-            post: postSaveResult,
+            post: post,
             creator: {_id: user._id, name : user.name}
         })
     }
@@ -111,13 +117,13 @@ exports.putPost = async (req,res,next) =>{
         throw error;
     }
     try{
-        const post = await Post.findById(postId);
+        const post = await Post.findById(postId).populate('creator');
         if(!post){
             const error = new Error ('Could not find post');
             error.statusCode = 404;
             throw error;
         }
-        if(post.creator.toString()!==req.userId.toString()){
+        if(post.creator._id.toString()!==req.userId.toString()){
             const error = new Error ('Not Authorized');
             error.statusCode = 403;
             throw error;
@@ -129,6 +135,10 @@ exports.putPost = async (req,res,next) =>{
         post.imageUrl = imageUrl;
         post.content = content;
         const addedPost = await post.save();
+        io.getIO().emit('posts',{
+            action: 'update',
+            post: {...addedPost._doc, creator:{_id:req.userId,name: post.creator.name}}
+        })
         res.status(200).json({
             message: 'Post Updated',
             post: addedPost,
@@ -162,9 +172,13 @@ exports.deletePost = async (req,res,next) =>{
         const user = await User.findById(req.userId);
         user.posts.pull(postId);
         const userResult = await user.save();
+        io.getIO().emit('posts',{
+            action: 'delete',
+            post: removedPost
+        })
         res.status(200).json({
             message: `Post Deleted`,
-            post: userResult
+            post: postId
         })
     }
     catch(err){

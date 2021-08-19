@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 const path = require('path');
 const multer = require('multer');
 
+
 const feedRoutes = require('./routes/feed')
 const authRoutes = require('./routes/auth')
 
@@ -61,7 +62,11 @@ app.use((error,req,res,next)=>{
 mongoose.connect(MONGODB_URI)
     .then(result=>{
         console.log('MongoDb Connected');
-        app.listen(8080);
+        const server = app.listen(8080);
+        const io = require('./socket').init(server);
+        io.on('connection',socket =>{
+            console.log('---------client connected--------');
+        })
     })
     .catch(err=>console.log(err))
 
